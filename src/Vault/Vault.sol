@@ -175,6 +175,7 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
         if (shares == 0) revert ZeroAmount();
         AssetConfig storage config = _requireWhitelistedAsset(asset);
         _accrueFees(asset);
+        bool hadUnboundFeeShares = _unboundFeeShares[msg.sender] != 0;
         _materializeUnboundFeeShares(msg.sender, asset);
         _requireShareAsset(msg.sender, asset);
 
@@ -196,6 +197,8 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
         }
 
         _userShares[msg.sender] = availableShares - shares;
+        if (_userShares[msg.sender] == 0 && !hadUnboundFeeShares) delete shareAssetOf[msg.sender];
+
         totalShares -= shares;
         sharesByAsset[asset] -= shares;
         totalPendingWithdrawWad += effectiveWadOwed;
@@ -237,7 +240,6 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
 
         _removePendingUser(msg.sender);
         delete pendingWithdraw[msg.sender];
-        if (_userShares[msg.sender] == 0) delete shareAssetOf[msg.sender];
 
         IERC20(request.asset).safeTransfer(msg.sender, amountOut);
 
