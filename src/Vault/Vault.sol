@@ -669,7 +669,7 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
 
     function _setOrCheckShareAsset(address user, address asset) internal {
         address existingAsset = shareAssetOf[user];
-        if (existingAsset == address(0)) {
+        if (existingAsset == address(0) || _userShares[user] == 0) {
             shareAssetOf[user] = asset;
             return;
         }
