@@ -175,7 +175,6 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
         if (shares == 0) revert ZeroAmount();
         AssetConfig storage config = _requireWhitelistedAsset(asset);
         _accrueFees(asset);
-        bool hadUnboundFeeShares = _unboundFeeShares[msg.sender] != 0;
         _materializeUnboundFeeShares(msg.sender, asset);
         _requireShareAsset(msg.sender, asset);
 
@@ -197,8 +196,6 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
         }
 
         _userShares[msg.sender] = availableShares - shares;
-        if (_userShares[msg.sender] == 0 && !hadUnboundFeeShares) delete shareAssetOf[msg.sender];
-
         totalShares -= shares;
         sharesByAsset[asset] -= shares;
         totalPendingWithdrawWad += effectiveWadOwed;
@@ -229,17 +226,24 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
         AssetConfig storage config = assetConfig[request.asset];
         uint256 availableLiquidity = _syncTrackedHoldings(request.asset, config);
         amountOut = request.reservedAmount;
+        uint256 settledWad = request.wadOwed;
+        if (block.number > request.unlockBlock) {
+            uint256 repricedWad = _computeAssets(request.shares, totalShares + request.shares, totalManagedWad);
+            amountOut = _fromWad(repricedWad, config.decimals);
+            settledWad = _toWad(amountOut, config.decimals);
+        }
         if (amountOut > availableLiquidity) {
             revert InsufficientAssetLiquidity(request.asset, amountOut, availableLiquidity);
         }
 
-        totalManagedWad -= request.wadOwed;
+        totalManagedWad -= settledWad;
         totalPendingWithdrawWad -= request.wadOwed;
         reservedForWithdraw[request.asset] -= request.reservedAmount;
         config.totalHeld = availableLiquidity - amountOut;
 
         _removePendingUser(msg.sender);
         delete pendingWithdraw[msg.sender];
+        if (_userShares[msg.sender] == 0) delete shareAssetOf[msg.sender];
 
         IERC20(request.asset).safeTransfer(msg.sender, amountOut);
 
@@ -669,7 +673,7 @@ contract Vault is IVault, Ownable2Step, ReentrancyGuard, Pausable {
 
     function _setOrCheckShareAsset(address user, address asset) internal {
         address existingAsset = shareAssetOf[user];
-        if (existingAsset == address(0) || _userShares[user] == 0) {
+        if (existingAsset == address(0)) {
             shareAssetOf[user] = asset;
             return;
         }
